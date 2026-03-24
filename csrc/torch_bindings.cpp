@@ -168,6 +168,14 @@ TORCH_LIBRARY_EXPAND(CONCAT(TORCH_EXTENSION_NAME, _cache_ops), cache_ops) {
       "                     Tensor scale) -> ()");
   cache_ops.impl("concat_and_cache_mla", torch::kXPU, &concat_and_cache_mla);
 
+  cache_ops.def(
+      "mla_sparse_decode(Tensor q, Tensor kv_cache, Tensor indices,"
+      "                  float sm_scale, int d_v,"
+      "                  Tensor k_scale, Tensor v_scale,"
+      "                  str kv_cache_dtype)"
+      " -> (Tensor, Tensor, Tensor)");
+  cache_ops.impl("mla_sparse_decode", torch::kXPU, &mla_sparse_decode);
+
   // Gather cache blocks from src_cache to dst.
   cache_ops.def(
       "gather_cache(Tensor src_cache, Tensor! dst, Tensor block_table, "

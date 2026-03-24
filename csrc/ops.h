@@ -66,6 +66,16 @@ void concat_and_cache_mla(
     const std::string& kv_cache_dtype,
     torch::Tensor& scale);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> mla_sparse_decode(
+    torch::Tensor& q,
+    torch::Tensor& kv_cache,
+    torch::Tensor& indices,
+    double sm_scale,
+    int64_t d_v,
+    torch::Tensor& k_scale,
+    torch::Tensor& v_scale,
+    const std::string& kv_cache_dtype);
+
 void gather_cache(
     torch::Tensor const& src_cache,    // [NUM_BLOCKS, BLOCK_SIZE, ENTRIES...]
     torch::Tensor const& dst,          // [TOT_TOKENS, ENTRIES...]
