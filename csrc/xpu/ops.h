@@ -24,6 +24,16 @@ torch::Tensor fp8_gemm_w8a16(
     const std::optional<torch::Tensor>& B_scale_,
     const std::optional<torch::Tensor>& bias_);
 
+torch::Tensor fp8_block_scaled_gemm(
+    const torch::Tensor& A,
+    const torch::Tensor& B,
+    const torch::Tensor& A_scale,
+    const torch::Tensor& B_scale,
+    int64_t block_n,
+    int64_t block_k,
+    std::optional<c10::ScalarType> out_dtype,
+    const std::optional<torch::Tensor>& bias_);
+
 torch::Tensor int4_gemm_w4a16(
     const torch::Tensor& A_,
     const torch::Tensor& B,

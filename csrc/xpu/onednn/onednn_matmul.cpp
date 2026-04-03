@@ -1,4 +1,5 @@
 #include <vector>
+#include "fp8_block_scaled_gemm_w8a8.h"
 #include "fp8_gemm_w8a8.h"
 #include "fp8_gemm_w8a16.h"
 #include "int4_gemm_w4a16.h"
@@ -92,6 +93,34 @@ torch::Tensor fp8_gemm_w8a16(
   oneDNN::dnnl_matmul_w8a16_fp8(result, A, B, is_nt, bias_, B_scale);
   return result;
 }
+
+  torch::Tensor fp8_block_scaled_gemm(
+    const torch::Tensor& A,
+    const torch::Tensor& B,
+    const torch::Tensor& A_scale,
+    const torch::Tensor& B_scale,
+    int64_t block_n,
+    int64_t block_k,
+    std::optional<c10::ScalarType> out_dtype,
+    const std::optional<torch::Tensor>& bias_) {
+    const at::DeviceGuard device_guard(A.device());
+
+    auto a_st = A.scalar_type();
+    auto b_st = B.scalar_type();
+    TORCH_CHECK(
+      is_supported_fp8(a_st) && is_supported_fp8(b_st) && a_st == b_st,
+      "input and weight must be f8_e5m2 or f8_e4m3fn for fp8 block scaled "
+      "matmul");
+
+    auto out = oneDNN::dnnl_matmul_w8a8_block_fp8(
+      A, B, A_scale, B_scale, block_n, block_k, out_dtype, bias_);
+
+    TORCH_CHECK(
+      out.scalar_type() == torch::kFloat16 ||
+        out.scalar_type() == torch::kBFloat16,
+      "output must be float16 or bfloat16 for fp8 block scaled matmul");
+    return out;
+  }
 
 torch::Tensor int4_gemm_w4a16(
     const torch::Tensor& A_,  // src, [b, m, k]

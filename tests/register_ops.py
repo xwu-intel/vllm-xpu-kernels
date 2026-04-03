@@ -308,6 +308,19 @@ def fp8_gemm_w8a16(input: torch.Tensor, weight: torch.Tensor,
     return torch.ops._xpu_C.fp8_gemm_w8a16(input, weight, scale_wei, scale_act)
 
 
+def fp8_block_scaled_gemm(input: torch.Tensor,
+                          weight: torch.Tensor,
+                          scale_act: torch.Tensor,
+                          scale_wei: torch.Tensor,
+                          block_n: int,
+                          block_k: int,
+                          out_dtype: Optional[torch.dtype],
+                          bias: Optional[torch.Tensor] = None):
+    return torch.ops._xpu_C.fp8_block_scaled_gemm(input, weight, scale_act,
+                                                  scale_wei, block_n, block_k,
+                                                  out_dtype, bias)
+
+
 # moe
 def moe_sum(input: torch.Tensor, output: torch.Tensor) -> None:
     torch.ops._moe_C.moe_sum(input, output)
