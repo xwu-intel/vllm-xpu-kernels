@@ -25,6 +25,59 @@ static inline void dnnl_matmul_w8a8_fp8(
   const int n = o_sz.back();  // presume channel last format
   const int k = *(src_sz.end() - 1);
 
+  bool src_block_scales = false;
+  bool wei_block_scales = false;
+  int64_t src_group_k = k;
+  int64_t wei_group_k = k;
+  int64_t wei_group_n = 1;
+  torch::Tensor wei_scale_attr = m2_sc;
+
+  if (m1_sc.numel() > 1) {
+    TORCH_CHECK(
+        m1_sc.dim() == 2 && m1_sc.size(0) == m,
+        "A_scale must be scalar or 2D [M, num_k_tiles].");
+    const int64_t src_k_tiles = m1_sc.size(1);
+    TORCH_CHECK(src_k_tiles > 0, "A_scale K-tiles must be > 0.");
+    src_group_k = (k + src_k_tiles - 1) / src_k_tiles;
+    TORCH_CHECK(
+        src_group_k > 0 && (k + src_group_k - 1) / src_group_k == src_k_tiles,
+        "A_scale has incompatible K tile shape.");
+    src_block_scales = (src_group_k != k);
+  }
+
+  if (m2_sc.numel() > 1) {
+    if (m2_sc.dim() == 1) {
+      TORCH_CHECK(
+          m2_sc.size(0) == n,
+          "B_scale 1D shape must be [N] for per-channel scaling.");
+    } else {
+      TORCH_CHECK(
+          m2_sc.dim() == 2,
+          "B_scale must be scalar, 1D [N], or 2D [num_n_tiles, num_k_tiles].");
+      const int64_t wei_n_tiles = m2_sc.size(0);
+      const int64_t wei_k_tiles = m2_sc.size(1);
+      TORCH_CHECK(
+          wei_n_tiles > 0 && wei_k_tiles > 0,
+          "B_scale tile dimensions must be > 0.");
+
+      wei_group_n = (n + wei_n_tiles - 1) / wei_n_tiles;
+      wei_group_k = (k + wei_k_tiles - 1) / wei_k_tiles;
+      TORCH_CHECK(
+          wei_group_n > 0 &&
+              (n + wei_group_n - 1) / wei_group_n == wei_n_tiles,
+          "B_scale has incompatible N tile shape.");
+      TORCH_CHECK(
+          wei_group_k > 0 &&
+              (k + wei_group_k - 1) / wei_group_k == wei_k_tiles,
+          "B_scale has incompatible K tile shape.");
+
+      wei_block_scales = true;
+      // oneDNN weights dimensions are [K, N], so block scales must be [Kt, Nt]
+      // when using mask (1<<0) + (1<<1).
+      wei_scale_attr = m2_sc.transpose(0, 1).contiguous();
+    }
+  }
+
   // get joint dtypes
   joint_dtypes_t jd;
   auto in_dtype = mat1.scalar_type();
@@ -81,7 +134,7 @@ static inline void dnnl_matmul_w8a8_fp8(
       pattr.set_scales(
           DNNL_ARG_SRC,
           /* mask */ (1 << 0) + (1 << 1),
-          {1, k},
+          {1, src_group_k},
           get_onednn_dtype(m1_sc));
       /* per token quant */
     }
@@ -93,6 +146,13 @@ static inline void dnnl_matmul_w8a8_fp8(
           {},
           get_onednn_dtype(m2_sc));
       /* per tensor quant */
+    } else if (wei_block_scales) {
+      pattr.set_scales(
+          DNNL_ARG_WEIGHTS,
+          /* mask */ (1 << 0) + (1 << 1),
+          {wei_group_k, wei_group_n},
+          get_onednn_dtype(wei_scale_attr));
+      /* block-wise quant */
     } else {
       pattr.set_scales(
           DNNL_ARG_WEIGHTS,
@@ -111,19 +171,24 @@ static inline void dnnl_matmul_w8a8_fp8(
   at::Device curDevice = at::Device(at::kXPU, dev_id);
   auto engine = GpuEngineManager::Instance().get_engine(curDevice);
 
-  int m1_sc_group_size = m1_sc.numel();
-  int m2_sc_group_size = m2_sc.numel();
-  int sc_group_size = (m1_sc_group_size << 8) | m2_sc_group_size;
+    int m1_sc_group_size = m1_sc.numel();
+    int m2_sc_group_size = wei_scale_attr.numel();
+    int sc_group_size =
+      ((src_group_k & 0x3FF) << 22) | ((wei_group_k & 0x3FF) << 12) |
+      ((wei_group_n & 0x3FF) << 2) |
+      ((src_block_scales ? 1 : 0) << 1) | (wei_block_scales ? 1 : 0);
+    sc_group_size ^= (m1_sc_group_size & 0x7FF) << 11;
+    sc_group_size ^= (m2_sc_group_size & 0x7FF);
   auto& matmul_ext = matmul_primitive_create_and_cache(
       jd, tt, b_type, m, n, k, lda, ldb, ldc, dev_id, f_attr, sc_group_size);
 
   matmul_ext.set_attribute(
       arg_off++,
       DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
-      m2_sc.data_ptr(),
+      wei_scale_attr.data_ptr(),
       [&]() {
         return make_onednn_memory(
-            get_onednn_md(m2_sc), engine, m2_sc.data_ptr());
+        get_onednn_md(wei_scale_attr), engine, wei_scale_attr.data_ptr());
       });
   matmul_ext.set_attribute(
       arg_off++, DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, m1_sc.data_ptr(), [&]() {

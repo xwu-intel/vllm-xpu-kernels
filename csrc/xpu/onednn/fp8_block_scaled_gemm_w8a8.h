@@ -2,6 +2,8 @@
 
 #include <torch/torch.h>
 
+#include "../ops.h"
+
 namespace oneDNN {
 
 static inline torch::Tensor dnnl_matmul_w8a8_block_fp8(
@@ -32,40 +34,13 @@ static inline torch::Tensor dnnl_matmul_w8a8_block_fp8(
   TORCH_CHECK(
       m2_sc.dim() == 2 && m2_sc.size(0) == n_tiles && m2_sc.size(1) == k_tiles,
       "B_scale must have shape [ceil(N / block_n), ceil(K / block_k)].");
-
-  // Expand block scales into dense per-element scales.
-  auto m1_sc_dense = m1_sc.repeat_interleave(block_k, /*dim=*/1);
-  if (m1_sc_dense.size(1) > k) {
-    m1_sc_dense = m1_sc_dense.narrow(/*dim=*/1, /*start=*/0, /*length=*/k);
-  }
-
-  auto m2_sc_dense =
-      m2_sc.repeat_interleave(block_n, /*dim=*/0).repeat_interleave(block_k, /*dim=*/1);
-  if (m2_sc_dense.size(0) > n) {
-    m2_sc_dense = m2_sc_dense.narrow(/*dim=*/0, /*start=*/0, /*length=*/n);
-  }
-  if (m2_sc_dense.size(1) > k) {
-    m2_sc_dense = m2_sc_dense.narrow(/*dim=*/1, /*start=*/0, /*length=*/k);
-  }
-
-  // Dequantize and invoke XPU GEMM. On XPU, torch.matmul maps to oneDNN-backed
-  // kernels for these dtypes.
-  auto a_deq = mat1.to(torch::kFloat) * m1_sc_dense.to(torch::kFloat);
-  auto b_deq = mat2.to(torch::kFloat) * m2_sc_dense.to(torch::kFloat);
-
-  auto out = at::matmul(a_deq, b_deq.transpose(0, 1));
-
-  const auto out_dtype_ = out_dtype.value_or(torch::kHalf);
-  out = out.to(out_dtype_);
-
-  if (bias.has_value() && bias.value().defined() && bias.value().numel() > 0) {
-    TORCH_CHECK(
-        bias.value().numel() == n,
-        "bias must be 1D with N elements if provided.");
-    out = out + bias.value();
-  }
-
-  return out;
+  return fp8_gemm(
+      mat1,
+      mat2.transpose(0, 1),
+      out_dtype,
+      std::optional<torch::Tensor>(m1_sc),
+      std::optional<torch::Tensor>(m2_sc),
+      bias);
 }
 
 }  // namespace oneDNN
