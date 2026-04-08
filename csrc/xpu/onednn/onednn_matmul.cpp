@@ -1,5 +1,4 @@
 #include <vector>
-#include "fp8_block_scaled_gemm_w8a8.h"
 #include "fp8_gemm_w8a8.h"
 #include "fp8_gemm_w8a16.h"
 #include "int4_gemm_w4a16.h"
