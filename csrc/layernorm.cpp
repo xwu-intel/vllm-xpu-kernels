@@ -155,7 +155,8 @@ class rms_norm_kernel {
         vec4_t<scalar_t> src2 = v_w[idx];
         for (int j = 0; j < VEC_SIZE; j++) {
           float x = static_cast<float>(src1.val[j]);
-          dst.val[j] = ((scalar_t)(x * s_variance_val)) * src2.val[j];
+          float w = static_cast<float>(src2.val[j]);
+          dst.val[j] = static_cast<scalar_t>(x * s_variance_val * w);
         }
         v_out[idx] = dst;
       }
@@ -163,7 +164,8 @@ class rms_norm_kernel {
       for (int idx = item_ct1.get_local_id(2); idx < hidden_size;
            idx += item_ct1.get_local_range(2)) {
         float x = (float)input_row[idx];
-        out_row[idx] = ((scalar_t)(x * (*s_variance_ptr))) * weight[idx];
+        float w = static_cast<float>(weight[idx]);
+        out_row[idx] = static_cast<scalar_t>(x * (*s_variance_ptr) * w);
       }
     }
   }
@@ -277,8 +279,9 @@ class fused_add_rms_norm_kernel {
     for (int idx = item_ct1.get_local_id(2); idx < hidden_size;
          idx += item_ct1.get_local_range(2)) {
       float x = (float)residual[item_ct1.get_group(2) * hidden_size + idx];
+      float w = static_cast<float>(weight[idx]);
       input[item_ct1.get_group(2) * input_stride + idx] =
-          ((scalar_t)(x * (*s_variance_ptr))) * weight[idx];
+          static_cast<scalar_t>(x * (*s_variance_ptr) * w);
     }
   }
 
