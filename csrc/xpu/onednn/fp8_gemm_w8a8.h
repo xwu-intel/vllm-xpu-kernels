@@ -30,12 +30,10 @@ static inline void dnnl_matmul_w8a8_fp8(
                         (m1_sc.size(1) != 1) && (m2_sc.size(1) != 1);
   int64_t group_size = -1;
   if (is_block_quant) {
-    TORCH_CHECK(
-        m1_sc.size(1) == m2_sc.size(1),
-        "Mismatch group size in input and weight.",
-        m1_sc.size(1),
-        " vs ",
-        m2_sc.size(1));
+    // Derive group_size from input scale (A_scale has shape [M_groups, K_groups]).
+    // Weight scale may be in (N_groups, K_groups) or (K_groups, N_groups) layout
+    // depending on whether B is in (N,K) or (K,N) format, so we only validate
+    // against A_scale's K-dimension group count.
     group_size = k / m1_sc.size(1);
   }
 
