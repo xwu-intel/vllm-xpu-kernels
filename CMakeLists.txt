@@ -51,12 +51,12 @@ set(BUILD_SYCL_TLA_KERNELS
     CACHE BOOL "Build SYCL-TLA based kernels for XPU")
 
 set(ONEDNN_GIT_REPO
-    "https://github.com/uxlfoundation/oneDNN.git"
+    "https://github.com/xwu-intel/oneDNN.git"
     CACHE STRING "oneDNN git repository URL")
 
 # rls-v3.12
 set(ONEDNN_GIT_TAG
-    "80afa71049cd69a3df32adcccb623b12cd7baa22"
+    "e8cd3f2aa21e4795a8aae85c8a841ca2bb16fe1e"
     CACHE STRING "oneDNN git commit hash or tag")
 # ARCHITECTURE OPTIONS
 option(VLLM_XPU_ENABLE_XE2 "Enable XE2 architecture kernels" ON)
