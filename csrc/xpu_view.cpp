@@ -101,29 +101,32 @@ torch::Tensor get_xpu_view_from_cpu_tensor(torch::Tensor& cpu_tensor) {
         cpu_tensor.sizes(), cpu_tensor.options().device(xpu_device));
   }
 
-  // If the CPU tensor isn't pinned, allocate a new pinned buffer and copy
-  // the (contiguous) data into it. Keep this pinned tensor alive as the
-  // owner of the resulting view, just like the pinned input tensor would be.
+  // If the CPU tensor isn't pinned, allocate a pinned buffer with the same
+  // layout and copy into it. Keep this pinned tensor alive as the owner of the
+  // resulting view, just like the pinned input tensor would be.
   torch::Tensor pinned_owner;
   if (cpu_tensor.is_pinned()) {
     pinned_owner = cpu_tensor;
   } else {
-    torch::Tensor contiguous_cpu = cpu_tensor.contiguous();
-    pinned_owner = at::empty_like(
-        contiguous_cpu, contiguous_cpu.options().pinned_memory(true));
-    pinned_owner.copy_(contiguous_cpu);
+    pinned_owner = at::empty_strided(
+        cpu_tensor.sizes(),
+        cpu_tensor.strides(),
+        cpu_tensor.options().pinned_memory(true));
+    pinned_owner.copy_(cpu_tensor);
   }
 
-  // Get raw host pointer from the pinned tensor.
-  void* host_ptr = pinned_owner.data_ptr();
+  // Wrap the complete backing storage. data_ptr() points at the first logical
+  // element and therefore cannot represent views with a non-zero offset.
+  auto host_storage = pinned_owner.storage();
+  void* host_ptr = host_storage.mutable_data();
+  size_t byte_size = host_storage.nbytes();
 
-  // We'll use the same sizes, strides, and dtype as the pinned CPU tensor.
-  // TODO: check if layout is respected.
+  // Preserve the logical tensor metadata over the shared backing storage.
   auto sizes = pinned_owner.sizes();
   auto strides = pinned_owner.strides();
+  auto storage_offset = pinned_owner.storage_offset();
   auto scalar_type = pinned_owner.scalar_type();
 
-  size_t byte_size = pinned_owner.numel() * pinned_owner.element_size();
   // Keep `pinned_owner` storage alive through the view tensor's lifetime.
   vllm::xpu::XPUHostViewAllocator allocator(host_ptr, byte_size, pinned_owner);
   c10::DataPtr data_ptr = allocator.allocate(byte_size);
@@ -135,7 +138,7 @@ torch::Tensor get_xpu_view_from_cpu_tensor(torch::Tensor& cpu_tensor) {
       c10::DispatchKeySet(c10::DispatchKey::XPU),
       at::scalarTypeToTypeMeta(scalar_type));
 
-  // Set sizes and strides during construction to avoid extra copy
+  impl->set_storage_offset(storage_offset);
   impl->set_sizes_and_strides(sizes, strides);
 
   // Due to from_blob can only accept the device pointer, we use

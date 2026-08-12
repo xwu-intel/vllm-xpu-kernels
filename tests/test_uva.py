@@ -101,6 +101,68 @@ def test_non_pinned_cpu_tensor(device):
 
 
 @pytest.mark.parametrize("device", XPU_DEVICES)
+def test_pinned_transposed_cpu_tensor(device):
+    torch.set_default_device(device)
+    cpu_tensor = torch.arange(12,
+                              dtype=torch.int32,
+                              device="cpu",
+                              pin_memory=True).view(3, 4).t()
+    assert not cpu_tensor.is_contiguous()
+
+    xpu_view = torch.ops._C.get_xpu_view_from_cpu_tensor(cpu_tensor)
+
+    assert xpu_view.shape == cpu_tensor.shape
+    assert xpu_view.stride() == cpu_tensor.stride()
+    torch.testing.assert_close(xpu_view.cpu(), cpu_tensor)
+
+    cpu_tensor[1, 2] = -1
+    assert xpu_view[1, 2] == -1
+    xpu_view[3, 1] = -2
+    assert cpu_tensor[3, 1] == -2
+
+
+@pytest.mark.parametrize("device", XPU_DEVICES)
+def test_non_pinned_transposed_cpu_tensor(device):
+    torch.set_default_device(device)
+    cpu_tensor = torch.arange(12, dtype=torch.int32, device="cpu").view(3, 4).t()
+    assert not cpu_tensor.is_pinned()
+    assert not cpu_tensor.is_contiguous()
+
+    xpu_view = torch.ops._C.get_xpu_view_from_cpu_tensor(cpu_tensor)
+
+    assert xpu_view.shape == cpu_tensor.shape
+    assert xpu_view.stride() == cpu_tensor.stride()
+    torch.testing.assert_close(xpu_view.cpu(), cpu_tensor)
+
+    cpu_tensor[1, 2] = -1
+    assert xpu_view[1, 2] != -1
+
+
+@pytest.mark.parametrize("device", XPU_DEVICES)
+def test_pinned_cpu_tensor_with_storage_offset(device):
+    torch.set_default_device(device)
+    cpu_storage = torch.arange(30,
+                               dtype=torch.int32,
+                               device="cpu",
+                               pin_memory=True).view(5, 6)
+    cpu_tensor = cpu_storage[1:4, 1:5]
+    assert cpu_tensor.storage_offset() > 0
+    assert not cpu_tensor.is_contiguous()
+
+    xpu_view = torch.ops._C.get_xpu_view_from_cpu_tensor(cpu_tensor)
+
+    assert xpu_view.shape == cpu_tensor.shape
+    assert xpu_view.stride() == cpu_tensor.stride()
+    assert xpu_view.storage_offset() == cpu_tensor.storage_offset()
+    torch.testing.assert_close(xpu_view.cpu(), cpu_tensor)
+
+    cpu_tensor[0, 0] = -1
+    assert xpu_view[0, 0] == -1
+    xpu_view[2, 3] = -2
+    assert cpu_tensor[2, 3] == -2
+
+
+@pytest.mark.parametrize("device", XPU_DEVICES)
 def test_empty_cpu_tensor(device):
     torch.set_default_device(device)
     cpu_tensor = torch.empty(0, dtype=torch.int32, device="cpu")
